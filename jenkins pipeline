@@ -1,0 +1,67 @@
+pipeline {
+    agent any
+    
+    tools {
+        maven 'maven3'
+        jdk 'jdk17'
+    }
+
+    environment {
+        SCANNER_HOME= tool 'sonar-scanner'
+        IMAGE_NAME = "venkivirat/blog-app:${BUILD_NUMBER}"
+    }
+
+    stages {
+        stage('Git checkout') {
+            steps {
+                git branch: 'main', credentialsId: 'git -cred', url: 'https://github.com/viratvenki001/blog-app.git'
+            }
+        }
+        stage('Build') {
+            steps {
+                sh 'mvn clean package'
+            }
+        }
+        stage('Sonarqube Analysis') {
+            steps {
+                script {
+                    withSonarQubeEnv('sonar-server') {
+                        sh '''$SCANNER_HOME/bin/sonar-scanner -Dsonar.projectName=blog-app -Dsonar.projectKey=blog-app \
+                              -Dsonar.java.binaries=target'''
+                        sh 'mvn clean verify sonar:sonar'      
+                    }          
+                }
+            }
+        }
+        stage('Docker Build Image') {
+            steps {
+                script {
+                    withDockerRegistry(credentialsId: 'docker-cred', toolName: 'docker') {
+                        sh 'docker build -t venkivirat/blogapp:latest .'
+                    }    
+                }    
+            }
+        }
+         stage('Docker push Image') {
+            steps {
+                script {
+                    withDockerRegistry(credentialsId: 'docker-cred', toolName: 'docker') {
+                        sh 'docker push venkivirat/blogapp:latest'
+                    }    
+                }    
+            }
+        }
+        stage('Deploy to Kubernetes') {
+            steps {
+                script {
+                    withCredentials([file(credentialsId: 'kubeconfig', variable: 'KUBECONFIG')]) {
+                        sh '''
+                        kubectl apply -f deployment.yaml
+                        kubectl apply -f service.yaml
+                        '''
+                    }    
+                }
+            }
+        }
+    }
+}
